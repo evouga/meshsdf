@@ -1,42 +1,12 @@
-# libigl example project
+Converts an .obj into a signed distance field.
 
-A blank project example showing how to use libigl and cmake. Feel free and
-encouraged to copy or fork this project as a way of starting a new personal
-project using libigl.
-
-## See the tutorial first
-
-Then build, run and understand the [libigl
-tutorial](http://libigl.github.io/libigl/tutorial/tutorial.html).
-
-## Compile
-
-Compile this project using the standard cmake routine:
-
-    mkdir build
-    cd build
-    cmake ..
-    make
-
-This should find and build the dependencies and create a `example_bin` binary.
-
-## Run
-
-From within the `build` directory just issue:
-
-    ./example_bin
-
-A glfw app should launch displaying a 3D cube.
+First translated and scales a mesh into a cube of size [0,L]^3. Then computes the SDF on an m x m x m grid within that cube.
 
 ## Dependencies
 
-The only dependencies are stl, eigen, [libigl](libigl.github.io/libigl/) and
-the dependencies of the `igl::viewer::Viewer` (mandatory: glfw and
-opengl, optional: nanogui and nanovg).
-
-We recommend you to install libigl using git via:
+Eigen (header-only): http://eigen.tuxfamily.org/index.php?title=Main_Page
+Libigl (header-only): get it using
 
     git clone --recursive https://github.com/libigl/libigl.git
 
-If you have installed libigl at `/path/to/libigl/` then a good place to clone
-this library is `/path/to/libigl-example-project/`.
+and set LIBIGL environment variable to point to the place where you clone libigl, so that CMake can find it.
