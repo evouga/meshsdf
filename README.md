@@ -4,8 +4,9 @@ First translated and scales a mesh into a cube of size [0,L]^3. Then computes th
 
 ## Dependencies
 
-Eigen (header-only): http://eigen.tuxfamily.org/index.php?title=Main_Page
-Libigl (header-only): get it using
+* Eigen (header-only): http://eigen.tuxfamily.org/index.php?title=Main_Page
+
+* Libigl (header-only): get it using
 
     git clone --recursive https://github.com/libigl/libigl.git
 
