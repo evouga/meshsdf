@@ -3,6 +3,74 @@
 #include <iostream>
 #include <igl/signed_distance.h>
 #include <igl/readOBJ.h>
+#include <igl/viewer/Viewer.h>
+#include <igl/copyleft/marching_cubes.h>
+
+Eigen::VectorXd gridvals;
+Eigen::MatrixXd P;
+double isovalue;
+int m;
+igl::viewer::Viewer *viewer;
+
+int valIndex(int i, int j, int k, int m)
+{
+    return i + j*m + k*m*m;
+}
+
+double cellGradientNormSquared(int x, int y, int z, double cubewidth, int m, const Eigen::VectorXd &gridvals)
+{
+    double ret = 0;
+    double cellWidth = cubewidth / double(m);
+    double area = cellWidth*cellWidth*cellWidth;
+    for (int i = 0; i < 2; i++)
+    {
+        for (int j = 0; j < 2; j++)
+        {
+            for (int k = 0; k < 2; k++)
+            {
+                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + i, y + j, z + k, m)]* area / 3.0;
+                int ni = (i + 1) % 2;
+                int nj = (j + 1) % 2;
+                int nk = (k + 1) % 2;
+                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + i, y + nj, z + nk, m)]* -area / 12.0;
+                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + ni, y + j, z + nk, m)]* -area / 12.0;
+                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + ni, y + nj, z + k, m)]* -area / 12.0;
+                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + ni, y + nj, z + nk, m)] * -area / 12.0;
+            }
+        }
+    }
+    return ret;
+}
+
+double sdfGradientResidual(double cubewidth, int m, const Eigen::VectorXd &gridvals)
+{
+    double ret = 0;
+    for (int i = 0; i < m - 1; i++)
+    {
+        for (int j = 0; j < m - 1; j++)
+        {
+            for (int k = 0; k < m - 1; k++)
+            {
+                double grad = cellGradientNormSquared(i, j, k, cubewidth, m, gridvals);                
+                double term = fabs(grad - 1.0);
+                ret += term;
+            }
+        }
+    }
+    return ret;
+}
+
+void recomputeIsosurface()
+{
+    Eigen::MatrixXd V;
+    Eigen::MatrixXi F;
+    Eigen::VectorXd vals = gridvals;
+    for (int i = 0; i < vals.size(); i++)
+        vals[i] -= isovalue;
+    igl::copyleft::marching_cubes(vals, P, m, m, m, V, F);
+    viewer->data.clear();
+    viewer->data.set_mesh(V, F);
+}
 
 void fitIntoCube(Eigen::MatrixXd &V, double cubeWidth)
 {
@@ -39,49 +107,69 @@ void fitIntoCube(Eigen::MatrixXd &V, double cubeWidth)
 	V *= s;
 }
 
-void computeSDF(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, double cubeWidth, int m, Eigen::VectorXd &gridvals)
+void generateGridPoints(double cubeWidth, int m, Eigen::MatrixXd &P)
 {
-	Eigen::MatrixXd P(m*m*m, 3);
-	for(int i=0; i<m; i++)
-	{
-		for(int j=0; j<m; j++)
-		{
-			for(int k=0; k<m; k++)
-			{
-				P(i*m*m + j*m + k, 0) = double(i)*cubeWidth/double(m-1);
-				P(i*m*m + j*m + k, 1) = double(j)*cubeWidth/double(m-1);
-				P(i*m*m + j*m + k, 2) = double(k)*cubeWidth/double(m-1);
-			}
-		}
-	}
-	Eigen::VectorXi I;
-	Eigen::MatrixXd C;
-	Eigen::MatrixXd N;
-	igl::signed_distance(P, V, F, igl::SIGNED_DISTANCE_TYPE_PSEUDONORMAL, -std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(), gridvals, I, C, N);
+    P.resize(m*m*m, 3);
+    for(int i=0; i<m; i++)
+    {
+        for(int j=0; j<m; j++)
+        {
+            for(int k=0; k<m; k++)
+            {
+                P(i + j*m + k*m*m, 0) = double(i)*cubeWidth/double(m-1);
+                P(i + j*m + k*m*m, 1) = double(j)*cubeWidth/double(m-1);
+                P(i + j*m + k*m*m, 2) = double(k)*cubeWidth/double(m-1);
+            }
+        }
+    }
 }
 
 int main(int argc, char *argv[])
 {
 	if(argc != 4)
 	{
-		std::cerr << "Usage: meshsdf [.obj file] [bounding cube width] [grid dimension m]" << std::endl;
+		std::cerr << "Usage: meshsdf [.txt file] [bounding cube width] [grid dimension m]" << std::endl;
 		return -1;
 	}
-	Eigen::MatrixXd V;
-	Eigen::MatrixXi F;
-	igl::readOBJ(argv[1], V, F);
+	
 
 	double cubewidth = strtod(argv[2], NULL);
-	int m = strtol(argv[3], NULL, 10);
+	m = strtol(argv[3], NULL, 10);
 
-	if(V.rows() == 0)
+    std::ifstream ifs(argv[1]);
+	if(!ifs)
 	{
-		std::cerr << "Couldn't read OBJ file " << argv[1] << std::endl;
+		std::cerr << "Couldn't read file " << argv[1] << std::endl;
 		return -1;
 	}
-	fitIntoCube(V, cubewidth);
-	Eigen::VectorXd gridvals;
-	computeSDF(V, F, cubewidth, m, gridvals);
-	std::cout << gridvals << std::endl;
 
+    gridvals.resize(m*m*m);
+    for (int i = 0; i < m*m*m; i++)
+    {
+        ifs >> gridvals[i];
+    }
+	
+    generateGridPoints(cubewidth, m, P);
+	
+
+    isovalue = 0;
+
+    viewer = new igl::viewer::Viewer;
+
+    recomputeIsosurface();
+
+    double cubevol = double(m*m*m);
+
+    std::cout << sdfGradientResidual(cubewidth, m, gridvals)/cubevol << std::endl;
+
+    viewer->callback_init = [&](igl::viewer::Viewer& v)
+    {
+        v.ngui->addVariable("Isovalue", isovalue);
+        v.ngui->addButton("Recompute Isosurface", recomputeIsosurface);
+        v.screen->performLayout();
+        return false;
+    };
+
+    viewer->data.set_face_based(true);
+    viewer->launch();
 }
