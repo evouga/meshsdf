@@ -99,6 +99,12 @@ int main(int argc, char *argv[])
 
     m = strtol(argv[2], NULL, 10);
 
+    if (m < 2)
+    {
+        printUsage();
+        return -1;
+    }
+
     if (opt.inflateFactor == std::numeric_limits<double>::infinity())
         opt.inflateFactor = 0.5 / m;
 
