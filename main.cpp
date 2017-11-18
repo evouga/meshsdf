@@ -1,64 +1,16 @@
 #include <Eigen/Core>
 #include <limits>
 #include <iostream>
-#include <igl/signed_distance.h>
-#include <igl/readOBJ.h>
+#include <igl/read_triangle_mesh.h>
 #include <igl/viewer/Viewer.h>
 #include <igl/copyleft/marching_cubes.h>
+#include "SDFAlgs.h"
 
 Eigen::VectorXd gridvals;
 Eigen::MatrixXd P;
 double isovalue;
 int m;
 igl::viewer::Viewer *viewer;
-
-int valIndex(int i, int j, int k, int m)
-{
-    return i + j*m + k*m*m;
-}
-
-double cellGradientNormSquared(int x, int y, int z, double cubewidth, int m, const Eigen::VectorXd &gridvals)
-{
-    double ret = 0;
-    double cellWidth = cubewidth / double(m);
-    double area = cellWidth*cellWidth*cellWidth;
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            for (int k = 0; k < 2; k++)
-            {
-                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + i, y + j, z + k, m)]* area / 3.0;
-                int ni = (i + 1) % 2;
-                int nj = (j + 1) % 2;
-                int nk = (k + 1) % 2;
-                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + i, y + nj, z + nk, m)]* -area / 12.0;
-                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + ni, y + j, z + nk, m)]* -area / 12.0;
-                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + ni, y + nj, z + k, m)]* -area / 12.0;
-                ret += gridvals[valIndex(x + i, y + j, z + k, m)]*gridvals[valIndex(x + ni, y + nj, z + nk, m)] * -area / 12.0;
-            }
-        }
-    }
-    return ret;
-}
-
-double sdfGradientResidual(double cubewidth, int m, const Eigen::VectorXd &gridvals)
-{
-    double ret = 0;
-    for (int i = 0; i < m - 1; i++)
-    {
-        for (int j = 0; j < m - 1; j++)
-        {
-            for (int k = 0; k < m - 1; k++)
-            {
-                double grad = cellGradientNormSquared(i, j, k, cubewidth, m, gridvals);                
-                double term = fabs(grad - 1.0);
-                ret += term;
-            }
-        }
-    }
-    return ret;
-}
 
 void recomputeIsosurface()
 {
@@ -72,104 +24,140 @@ void recomputeIsosurface()
     viewer->data.set_mesh(V, F);
 }
 
-void fitIntoCube(Eigen::MatrixXd &V, double cubeWidth)
-{
-	double mins[3], maxs[3];
-	for(int i=0; i<3; i++)
-	{
-		mins[i] = std::numeric_limits<double>::infinity();
-		maxs[i] = -std::numeric_limits<double>::infinity();
-	}
-	int nverts = V.rows();
-	for(int i=0; i<nverts; i++)
-	{
-		for(int j=0; j<3; j++)
-		{
-			mins[j] = std::min(mins[j], V(i,j));
-			maxs[j] = std::max(maxs[j], V(i,j));
-		}
-	}
-	double diameter = 0;
-	for(int i=0; i<3; i++)
-		diameter = std::max(diameter, maxs[i]-mins[i]);
 
-	for(int i=0; i<nverts; i++)
-	{
-		for(int j=0; j<3; j++)
-		{
-			V(i,j) -= mins[j];
-		}
-	}
-	
-	double s = cubeWidth/diameter;
-	if(diameter == 0.0)
-		s = 1.0;
-	V *= s;
-}
-
-void generateGridPoints(double cubeWidth, int m, Eigen::MatrixXd &P)
+struct options
 {
-    P.resize(m*m*m, 3);
-    for(int i=0; i<m; i++)
+    bool skipgen;
+    bool outputsdf;
+    bool showviewer;
+    double cubeWidth;
+    double inflateFactor;
+};
+
+bool parseFlags(int argc, char *argv[], options &opt)
+{
+    opt.skipgen = false;
+    opt.outputsdf = false;
+    opt.showviewer = false;
+    opt.cubeWidth = 1.0;
+    opt.inflateFactor = std::numeric_limits<double>::infinity();
+    for (int arg = 3; arg < argc; arg++)
     {
-        for(int j=0; j<m; j++)
+        if (argv[arg][0] != '-')
+            return false;
+        switch (argv[arg][1])
         {
-            for(int k=0; k<m; k++)
-            {
-                P(i + j*m + k*m*m, 0) = double(i)*cubeWidth/double(m-1);
-                P(i + j*m + k*m*m, 1) = double(j)*cubeWidth/double(m-1);
-                P(i + j*m + k*m*m, 2) = double(k)*cubeWidth/double(m-1);
-            }
+        case 's':
+            opt.skipgen = true;
+            break;
+        case 'o':
+            opt.outputsdf = true;
+            break;
+        case 'v':
+            opt.showviewer = true;
+            break;
+        case 'w':
+            if (arg + 1 >= argc)
+                return false;
+            arg++;
+            opt.cubeWidth = strtod(argv[arg], NULL);
+            break;
+        case 't':
+            if (arg + 1 >= argc)
+                return false;
+            arg++;
+            opt.inflateFactor = strtod(argv[arg], NULL);
+            break;
+        default:
+            return false;
         }
     }
+    return true;
+}
+
+void printUsage()
+{
+    std::cerr << "Usage: meshsdf (input-file) (grid dimension m) [flags]" << std::endl;
+    std::cerr << "Computes a signed distance field from the mesh file input-file and optionally visualizes its zero level set." << std::endl;
+    std::cerr << "Scales the model to fit into a unit cube, then builds an m x m x m grid for computing the SDF." << std::endl;
+    std::cerr << "Flags can be:" << std::endl;
+    std::cerr << " -s:  Skip SDF generation. In this case the input file should be a text file SDF instead of a mesh." << std::endl;
+    std::cerr << " -o:  Print the SDF to the consoele." << std::endl;
+    std::cerr << " -v:  Launch the visualization of the SDF after generation." << std::endl;
+    std::cerr << " -w (width):  Scales the object to fit a bounding cube of the given side length (default 1.0)." << std::endl;
+    std::cerr << " -t (factor):  Thickens the object by the given fraction of the bounding cube length before generating the SDF." << std::endl;
 }
 
 int main(int argc, char *argv[])
 {
-	if(argc != 4)
+    options opt;
+	if(argc < 3 || !parseFlags(argc, argv, opt))
 	{
-		std::cerr << "Usage: meshsdf [.txt file] [bounding cube width] [grid dimension m]" << std::endl;
-		return -1;
-	}
-	
-
-	double cubewidth = strtod(argv[2], NULL);
-	m = strtol(argv[3], NULL, 10);
-
-    std::ifstream ifs(argv[1]);
-	if(!ifs)
-	{
-		std::cerr << "Couldn't read file " << argv[1] << std::endl;
+        printUsage();
 		return -1;
 	}
 
-    gridvals.resize(m*m*m);
-    for (int i = 0; i < m*m*m; i++)
+    m = strtol(argv[2], NULL, 10);
+
+    if (opt.inflateFactor == std::numeric_limits<double>::infinity())
+        opt.inflateFactor = 0.5 / m;
+
+    generateGridPoints(opt.cubeWidth, m, P);
+
+    if (opt.skipgen)
     {
-        ifs >> gridvals[i];
-    }
-	
-    generateGridPoints(cubewidth, m, P);
-	
+        std::ifstream ifs(argv[1]);
+        if (!ifs)
+        {
+            std::cerr << "Couldn't read file " << argv[1] << std::endl;
+            return -1;
+        }
 
+        gridvals.resize(m*m*m);
+        for (int i = 0; i < m*m*m; i++)
+        {
+            ifs >> gridvals[i];
+        }
+    }
+    else
+    {
+        Eigen::MatrixXd V;
+        Eigen::MatrixXi F;
+        igl::read_triangle_mesh(argv[1], V, F);
+        if(V.rows() == 0)
+        {
+            std::cerr << "Couldn't read mesh file " << argv[1] << std::endl;
+            return -1;
+        }
+        meshToSDF(V, F, P, opt.cubeWidth, opt.inflateFactor, 4 * m, gridvals);
+    }
+
+    if(opt.outputsdf)
+    { 
+        std::cout << gridvals << std::endl;
+    }
+    
     isovalue = 0;
 
-    viewer = new igl::viewer::Viewer;
-
-    recomputeIsosurface();
-
-    double cubevol = double(m*m*m);
-
-    std::cout << sdfGradientResidual(cubewidth, m, gridvals)/cubevol << std::endl;
-
-    viewer->callback_init = [&](igl::viewer::Viewer& v)
+    if (opt.showviewer)
     {
-        v.ngui->addVariable("Isovalue", isovalue);
-        v.ngui->addButton("Recompute Isosurface", recomputeIsosurface);
-        v.screen->performLayout();
-        return false;
-    };
+        viewer = new igl::viewer::Viewer;
 
-    viewer->data.set_face_based(true);
-    viewer->launch();
+        recomputeIsosurface();
+
+        double cubevol = double(m*m*m);
+
+        std::cout << sdfGradientResidual(opt.cubeWidth, m, gridvals) / cubevol << std::endl;
+
+        viewer->callback_init = [&](igl::viewer::Viewer& v)
+        {
+            v.ngui->addVariable("Isovalue", isovalue);
+            v.ngui->addButton("Recompute Isosurface", recomputeIsosurface);
+            v.screen->performLayout();
+            return false;
+        };
+
+        viewer->data.set_face_based(true);
+        viewer->launch();
+    }
 }
