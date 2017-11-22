@@ -3,7 +3,10 @@
 
 #include <Eigen/Core>
 
-bool isInverted(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F);
+// 0: not inverted
+// 1: inverted
+// -1: cannot determine (due to size too small, or other problem with ray tracing)
+int isInverted(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F);
 
 void removeInvertedComponents(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, Eigen::MatrixXi &newF);
 

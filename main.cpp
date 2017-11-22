@@ -151,9 +151,9 @@ int main(int argc, char *argv[])
 
         recomputeIsosurface();
 
-        double cubevol = double(m*m*m);
+        //double cubevol = double(m*m*m);
 
-        std::cout << sdfGradientResidual(opt.cubeWidth, m, gridvals) / cubevol << std::endl;
+        //std::cout << sdfGradientResidual(opt.cubeWidth, m, gridvals) / cubevol << std::endl;
 
         viewer->callback_init = [&](igl::viewer::Viewer& v)
         {

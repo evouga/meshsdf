@@ -33,14 +33,14 @@ double surfaceArea(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F)
     return totarea;
 }
 
-bool isInverted(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F)
+int isInverted(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F)
 {
     if (F.rows() == 0)
         return false;
     // find point guaranteed outside mesh
     double minx = numeric_limits<double>::infinity();
     int nverts = (int)V.rows();
-    igl::writeOBJ("isect.obj", V, F);
+    //igl::writeOBJ("isect.obj", V, F);
     for (int i = 0; i < nverts; i++)
         minx = std::min(minx, V(i, 0));
     Eigen::Vector3d origin(minx - 1.0, 0, 0);
@@ -77,14 +77,13 @@ bool isInverted(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F)
                 Eigen::Vector3d e1 = V.row(F(curface, 1)) - V.row(F(curface, 0));
                 Eigen::Vector3d e2 = V.row(F(curface, 2)) - V.row(F(curface, 0));
                 Eigen::Vector3d n = e1.cross(e2);
-                return n.dot(dir) > 0;
+                return (n.dot(dir) > 0) ? 1 : 0;
             }
             curface = hit.id;
             tried[curface] = true;
         }
     }
-    std::cerr << "Problem detecting mesh orientation!" << std::endl;
-    exit(-1);
+    return -1;
 }
 
 void removeInvertedComponents(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, Eigen::MatrixXi &newF)
@@ -155,7 +154,10 @@ void removeInvertedComponents(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F
             idx++;
         }
 
-        if (!isInverted(V, compF))
+        double surfacearea = surfaceArea(V, compF);
+
+
+        if (isInverted(V, compF) == 0)
         {
             // keep entire component
             for (set<int>::iterator it = component.begin(); it != component.end(); ++it)
@@ -270,7 +272,6 @@ void reorientFaces(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, Eigen::Ma
             idx++;
         }
 
-        
         if (isInverted(V, compF))
         {
             // reverse entire component
