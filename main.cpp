@@ -32,6 +32,8 @@ struct options
     bool showviewer;
     double cubeWidth;
     double inflateFactor;
+    double n[3];
+    double u[3];
 };
 
 bool parseFlags(int argc, char *argv[], options &opt)
@@ -41,6 +43,12 @@ bool parseFlags(int argc, char *argv[], options &opt)
     opt.showviewer = false;
     opt.cubeWidth = 1.0;
     opt.inflateFactor = std::numeric_limits<double>::infinity();
+    opt.n[0] = 0;
+    opt.n[1] = 0;
+    opt.n[2] = -1;
+    opt.u[0] = 0;
+    opt.u[1] = 1;
+    opt.u[2] = 0;
     for (int arg = 3; arg < argc; arg++)
     {
         if (argv[arg][0] != '-')
@@ -68,6 +76,21 @@ bool parseFlags(int argc, char *argv[], options &opt)
             arg++;
             opt.inflateFactor = strtod(argv[arg], NULL);
             break;
+        case 'c':
+            if (arg + 6 >= argc)
+                return false;
+            arg++;
+            for (int i = 0; i < 3; i++)
+            {
+                opt.n[i] = strtod(argv[arg], NULL);
+                arg++;
+            }
+            for (int i = 0; i < 3; i++)
+            {
+                opt.u[i] = strtod(argv[arg], NULL);
+                arg++;
+            }
+            break;
         default:
             return false;
         }
@@ -86,6 +109,37 @@ void printUsage()
     std::cerr << " -v:  Launch the visualization of the SDF after generation." << std::endl;
     std::cerr << " -w (width):  Scales the object to fit a bounding cube of the given side length (default 1.0)." << std::endl;
     std::cerr << " -t (factor):  Thickens the object by the given fraction of the bounding cube length before generating the SDF." << std::endl;
+    std::cerr << " -c (nx) (ny) (nz) (ux) (uy) (uz): Generate a signed distance field as if viewing the object from a camera whose \"in\" direction is (nx, ny, nz) (default: (0,0,-1)) and whose \"up\" direction is (ux, uy, uz) (default: (0,1,0))." << std::endl;
+}
+
+Eigen::Matrix3d cameraMatrix(const options &opt)
+{
+    Eigen::Vector3d n(opt.n[0], opt.n[1], opt.n[2]);
+    Eigen::Vector3d u(opt.u[0], opt.u[1], opt.u[2]);
+    Eigen::Vector3d r = n.cross(u);
+    double rnorm = r.norm();
+    if (rnorm < 1e-6)
+    {
+        std::cerr << "Error: camera n and u directions degenerate. Using default settings." << std::endl;
+        Eigen::Matrix3d ret;
+        ret.setIdentity();
+        return ret;
+    }
+
+    r /= rnorm;
+    n /= n.norm();    
+
+    if (n.dot(u) > 1e-6)
+    {
+        std::cerr << "Warning: n and u direction not orthogonal. Altering u to be consistent with n." << std::endl;
+    }
+
+    u = r.cross(n);
+    Eigen::Matrix3d ret;
+    ret << r[0], u[0], -n[0],
+        r[1], u[1], -n[1],
+        r[2], u[2], -n[2];
+    return ret;
 }
 
 int main(int argc, char *argv[])
@@ -107,6 +161,8 @@ int main(int argc, char *argv[])
 
     if (opt.inflateFactor == std::numeric_limits<double>::infinity())
         opt.inflateFactor = 0.5 / m;
+
+    Eigen::Matrix3d camera = cameraMatrix(opt);
 
     generateGridPoints(opt.cubeWidth, m, P);
 
@@ -135,6 +191,13 @@ int main(int argc, char *argv[])
             std::cerr << "Couldn't read mesh file " << argv[1] << std::endl;
             return -1;
         }
+
+        int nverts = V.rows();
+        for (int i = 0; i < nverts; i++)
+        {
+            V.row(i) = camera.transpose()*V.row(i).transpose();
+        }
+
         meshToSDF(V, F, P, opt.cubeWidth, opt.inflateFactor, 4 * m, gridvals);
     }
 

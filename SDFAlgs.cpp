@@ -397,51 +397,37 @@ void generateGridPoints(double cubeWidth, int m, Eigen::MatrixXd &P)
 
 void fitIntoCube(Eigen::MatrixXd &V, double cubeWidth)
 {
-    double mins[3], maxs[3];
-    for(int i=0; i<3; i++)
-    {
-        mins[i] = std::numeric_limits<double>::infinity();
-        maxs[i] = -std::numeric_limits<double>::infinity();
-    }
+    Eigen::Vector3d centroid(0, 0, 0);
     int nverts = (int)V.rows();
-    for(int i=0; i<nverts; i++)
-    {
-        for(int j=0; j<3; j++)
-        {
-            mins[j] = std::min(mins[j], V(i,j));
-            maxs[j] = std::max(maxs[j], V(i,j));
-        }
-    }
-    double diameter = 0;
-    for(int i=0; i<3; i++)
-        diameter = std::max(diameter, maxs[i]-mins[i]);
 
-    for(int i=0; i<nverts; i++)
+    for (int i = 0; i < nverts; i++)
     {
-        for(int j=0; j<3; j++)
-        {
-            V(i,j) -= mins[j];
-        }
+        centroid += V.row(i);
     }
 
+    centroid /= nverts;
+
+    double radius = 0;
+    for (int i = 0; i < nverts; i++)
+    {
+        double dist = (centroid - V.row(i).transpose()).norm();
+        if (dist > radius)
+            radius = dist;
+
+        V.row(i) -= centroid.transpose();
+    }
+    
     // 10% padding
-    diameter *= 1.1;
+    radius *= 1.01;
 
-    double s = cubeWidth/diameter;
-    if(diameter == 0.0)
-        s = 1.0;
+    double s = 0.5*cubeWidth/radius;
     V *= s;
 
-    double offsets[3];
-    for (int i = 0; i < 3; i++)
-    {
-        offsets[i] = 0.5*(cubeWidth - s * (maxs[i] - mins[i]));
-    }
     for (int i = 0; i < nverts; i++)
     {
         for (int j = 0; j < 3; j++)
         {
-            V(i, j) += offsets[j];
+            V(i, j) += 0.5*cubeWidth;
         }
     }
 }
